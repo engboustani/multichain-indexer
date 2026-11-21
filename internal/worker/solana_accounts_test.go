@@ -307,3 +307,22 @@ func TestRecentSignatures_ForgetsOldest(t *testing.T) {
 	assert.True(t, r.has("b"))
 	assert.True(t, r.has("c"))
 }
+
+func TestSolanaAccountWorker_IdleMakesNoCallsAndResumesWithFullCheck(t *testing.T) {
+	f := newSolanaAccountFixture(t, 400)
+	require.NoError(t, f.worker.poll())
+	f.source.sigCalls = nil
+
+	onDemand := true
+	f.worker.config.NetworkId = "solana_devnet"
+	f.worker.config.OnDemand = &onDemand
+	f.worker.activity = loadedActivity(t, map[string]time.Time{})
+	f.source.fingerprints[testSolOwner] = "changed"
+	require.NoError(t, f.worker.poll())
+	assert.Empty(t, f.source.sigCalls, "idle: nothing read")
+
+	f.worker.activity = loadedActivity(t, map[string]time.Time{"solana_devnet": activityNow.Add(time.Hour)})
+	f.clock = f.clock.Add(time.Minute)
+	require.NoError(t, f.worker.poll())
+	assert.ElementsMatch(t, []string{testSolOwner, testSolATA}, f.source.sigCalls, "every account checked on waking")
+}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/fystack/multichain-indexer/pkg/common/enum"
 	"github.com/stretchr/testify/assert"
@@ -94,4 +95,21 @@ func TestValidateChainConfig_SolanaWatchMode(t *testing.T) {
 
 	err = validateChainConfig(ChainConfig{Type: enum.NetworkTypeEVM, Solana: SolanaConfig{WatchMode: "accounts"}})
 	require.Error(t, err)
+}
+
+func TestApplyDefaults_OnDemandAndIdleGrace(t *testing.T) {
+	onDemand, off := true, false
+	chains := Chains{
+		"bitcoin_signet": {Type: enum.NetworkTypeBtc, IdleGrace: 12 * time.Hour},
+		"monad_mainnet":  {Type: enum.NetworkTypeEVM, OnDemand: &off},
+		"bsc_testnet":    {Type: enum.NetworkTypeEVM},
+	}
+
+	require.NoError(t, chains.ApplyDefaults(Defaults{OnDemand: &onDemand, IdleGrace: time.Hour}))
+
+	assert.True(t, chains["bsc_testnet"].IsOnDemand())
+	assert.Equal(t, time.Hour, chains["bsc_testnet"].IdleGraceOrDefault())
+	assert.Equal(t, 12*time.Hour, chains["bitcoin_signet"].IdleGraceOrDefault())
+	assert.False(t, chains["monad_mainnet"].IsOnDemand())
+	assert.False(t, ChainConfig{}.IsOnDemand(), "off unless configured")
 }

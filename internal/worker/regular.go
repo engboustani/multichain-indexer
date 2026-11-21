@@ -43,7 +43,14 @@ type RegularWorker struct {
 	// hold up all chains. awaitingHead then makes Start wait for it instead, in the worker's own goroutine.
 	deferHeadWait bool
 	awaitingHead  bool
+	// The chain went idle (on demand, no payment awaited) and hasn't been read since; persisted so a restart resumes
+	// at the head too.
+	idle bool
 }
+
+// resumeMarginBlocks: on waking, read at least this many blocks below the head, covering blocks made between the
+// order that woke the chain and this poll.
+const resumeMarginBlocks = 20
 
 func NewRegularWorker(
 	ctx context.Context,
@@ -72,6 +79,7 @@ func NewRegularWorker(
 	rw.currentBlock = rw.determineStartingBlock()
 	rw.deferHeadWait = false
 	rw.loadBlockHashes()
+	rw.idle = rw.loadIdleFlag()
 	return rw
 }
 
@@ -111,11 +119,19 @@ func (rw *RegularWorker) Stop() {
 func (rw *RegularWorker) processRegularBlocks() error {
 	rw.logger.Debug("Starting tick", "currentBlock", rw.currentBlock)
 
+	if rw.isIdle() {
+		rw.enterIdle()
+		return nil
+	}
+
 	latest, err := rw.chain.GetLatestBlockNumber(rw.ctx)
 	if err != nil {
 		return fmt.Errorf("get latest block: %w", err)
 	}
 	processingHead := rw.processingHead(latest)
+	if rw.idle {
+		rw.resumeFromIdle(processingHead)
+	}
 	rw.updateHeadStatus(latest, time.Time{})
 
 	rw.logger.Debug("Got latest block",
@@ -465,6 +481,57 @@ func (rw *RegularWorker) skipAheadIfLagging(latest uint64) bool {
 		"catchup_ranges", len(ranges),
 	)
 	return true
+}
+
+// enterIdle stops reading the chain until a payment is awaited on it again.
+func (rw *RegularWorker) enterIdle() {
+	if rw.idle {
+		return
+	}
+	rw.idle = true
+	rw.saveIdleFlag(true)
+	rw.logger.Info("No payment awaited on this chain; idle until an order is created on it",
+		"chain", rw.chain.GetName(), "indexed_block", rw.currentIndexedBlock())
+}
+
+// resumeFromIdle moves to just below the head without backfilling the idle stretch: the payment that woke the chain
+// can only come after its deposit address was handed out, moments ago.
+func (rw *RegularWorker) resumeFromIdle(head uint64) {
+	margin := uint64(max(rw.config.ReorgRollbackWindow, resumeMarginBlocks))
+	start := uint64(1)
+	if head+1 > margin {
+		start = head + 1 - margin
+	}
+	if start > rw.currentBlock {
+		rw.currentBlock = start
+		_ = rw.blockStore.SaveLatestBlock(rw.chain.GetNetworkInternalCode(), start-1)
+		rw.clearBlockHashes()
+	}
+	rw.idle = false
+	rw.saveIdleFlag(false)
+	rw.logger.Info("Payment awaited; reading the chain again", "chain", rw.chain.GetName(), "from_block", rw.currentBlock)
+}
+
+func (rw *RegularWorker) idleKey() string {
+	return "on_demand/" + rw.chain.GetNetworkInternalCode() + "/idle"
+}
+
+func (rw *RegularWorker) loadIdleFlag() bool {
+	if rw.kvstore == nil {
+		return false
+	}
+	var idle bool
+	found, err := rw.kvstore.GetAny(rw.idleKey(), &idle)
+	return err == nil && found && idle
+}
+
+func (rw *RegularWorker) saveIdleFlag(idle bool) {
+	if rw.kvstore == nil {
+		return
+	}
+	if err := rw.kvstore.SetAny(rw.idleKey(), idle); err != nil {
+		rw.logger.Warn("Saving idle state failed", "error", err)
+	}
 }
 
 func (rw *RegularWorker) currentIndexedBlock() uint64 {

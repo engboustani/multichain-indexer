@@ -49,6 +49,14 @@ type BaseWorker struct {
 	failedChan     chan FailedBlockEvent
 	observer       BlockResultObserver
 	statusRegistry status.StatusRegistry
+	// Nil: the chain is always read.
+	activity *ChainActivity
+}
+
+// isIdle reports whether this on-demand chain has no payment awaited, so its workers make no RPC calls.
+func (bw *BaseWorker) isIdle() bool {
+	active, _ := bw.activity.State(bw.config)
+	return !active
 }
 
 // processingHead returns the highest block this worker may process after the

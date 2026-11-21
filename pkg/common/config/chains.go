@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"dario.cat/mergo"
 )
@@ -89,6 +90,13 @@ func (c Chains) ApplyDefaults(def Defaults) error {
 		if chain.ReorgRollbackWindow == 0 {
 			chain.ReorgRollbackWindow = def.ReorgRollbackWindow
 		}
+		if chain.OnDemand == nil && def.OnDemand != nil {
+			onDemand := *def.OnDemand
+			chain.OnDemand = &onDemand
+		}
+		if chain.IdleGrace == 0 {
+			chain.IdleGrace = def.IdleGrace
+		}
 		if err := mergo.Merge(&chain.Client, def.Client); err != nil {
 			return fmt.Errorf("merge client defaults for %s: %w", name, err)
 		}
@@ -102,6 +110,22 @@ func (c Chains) ApplyDefaults(def Defaults) error {
 		c[name] = chain
 	}
 	return nil
+}
+
+// DefaultIdleGrace is how long an on-demand chain stays active after its last watch window when idle_grace isn't set.
+const DefaultIdleGrace = time.Hour
+
+// IsOnDemand reports whether the chain is read only while a watch window is open. Defaults to false.
+func (c ChainConfig) IsOnDemand() bool {
+	return c.OnDemand != nil && *c.OnDemand
+}
+
+// IdleGraceOrDefault is how long the chain stays active after its watch window closes.
+func (c ChainConfig) IdleGraceOrDefault() time.Duration {
+	if c.IdleGrace > 0 {
+		return c.IdleGrace
+	}
+	return DefaultIdleGrace
 }
 
 // IsFromLatest reports whether a cold start begins at the chain head. Defaults to true when unset.

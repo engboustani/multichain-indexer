@@ -86,6 +86,9 @@ func (mw *MempoolWorker) Stop() {
 
 // processMempool polls the mempool for new transactions
 func (mw *MempoolWorker) processMempool() error {
+	if mw.isIdle() {
+		return nil
+	}
 	mw.logger.Debug("Polling mempool", "chain", mw.chain.GetName())
 
 	transactions, utxoEvents, err := mw.btcIndexer.GetMempoolTransactions(mw.ctx)

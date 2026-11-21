@@ -48,6 +48,7 @@ type WorkerDeps struct {
 	FailedChan     chan FailedBlockEvent
 	Observer       BlockResultObserver
 	StatusRegistry status.StatusRegistry
+	Activity       *ChainActivity
 }
 
 // ManagerConfig defines which workers to enable per chain.
@@ -177,7 +178,22 @@ func BuildWorkers(
 	}
 
 	setObserverOnWorkers(workers, deps.Observer)
+	setActivityOnWorkers(workers, deps.Activity)
 	return workers
+}
+
+// setActivityOnWorkers lets the workers of an on-demand chain pause while no payment is awaited on it.
+func setActivityOnWorkers(workers []Worker, activity *ChainActivity) {
+	for _, w := range workers {
+		switch wt := w.(type) {
+		case *RegularWorker:
+			wt.BaseWorker.activity = activity
+		case *MempoolWorker:
+			wt.BaseWorker.activity = activity
+		case *SolanaAccountWorker:
+			wt.BaseWorker.activity = activity
+		}
+	}
 }
 
 func newEVMProvider(chainName string, idx int, node config.NodeConfig, timeout time.Duration,
@@ -852,6 +868,13 @@ func CreateManagerWithWorkers(
 	statusRegistry := status.NewRegistry()
 
 	manager := NewManager(ctx, kvstore, blockStore, emitter, pubkeyStore)
+
+	// On-demand chains read watch_windows, which Treasury writes when it hands out a deposit address.
+	var activity *ChainActivity
+	if db != nil {
+		activity = NewChainActivity(NewDBWatchWindowLoader(db), time.Second)
+		activity.Start(ctx)
+	}
 	manager.registry = statusRegistry
 	manager.missingBlocks = newMissingBlocksStore(redisClient)
 
@@ -898,6 +921,17 @@ func CreateManagerWithWorkers(
 			logger.Fatal("Unsupported network type", "chain", chainName, "type", chainCfg.Type)
 		}
 		statusRegistry.RegisterChain(idxr.GetName(), chainName, chainCfg)
+		if chainCfg.IsOnDemand() {
+			if activity == nil {
+				logger.Error("on_demand needs the database for watch windows; reading the chain all the time", "chain", chainName)
+			} else {
+				cfgForStatus := chainCfg
+				statusRegistry.SetActivitySource(idxr.GetName(), func() (bool, bool, time.Time) {
+					active, until := activity.State(cfgForStatus)
+					return true, active, until
+				})
+			}
+		}
 		if source, ok := idxr.(interface{ ProviderSnapshot() []rpc.ProviderSnapshot }); ok {
 			statusRegistry.SetProviderSource(idxr.GetName(), func() []status.ProviderStatus {
 				return providerStatuses(source.ProviderSnapshot())
@@ -929,6 +963,7 @@ func CreateManagerWithWorkers(
 			FailedChan:     failedChan,
 			Observer:       managerCfg.Observer,
 			StatusRegistry: statusRegistry,
+			Activity:       activity,
 		}
 
 		// Helper: add workers if enabled (all modes share the same indexer and global rate limiter).
@@ -950,6 +985,7 @@ func CreateManagerWithWorkers(
 				w := NewSolanaAccountWorker(ctx, solIdxr, chainCfg, kvstore, blockStore, emitter, pubkeyStore,
 					NewDefaultDBLoader(db), failedChan, statusRegistry)
 				setObserverOnWorkers([]Worker{w}, managerCfg.Observer)
+				setActivityOnWorkers([]Worker{w}, activity)
 				manager.AddWorkers(w)
 				logger.Info("Worker enabled", "chain", chainName, "mode", "solana-accounts")
 			}
