@@ -59,6 +59,30 @@ func (bw *BaseWorker) isIdle() bool {
 	return !active
 }
 
+// The regular worker records when an on-demand chain went idle, so after a restart neither it nor the catch-up worker
+// queues the idle stretch for backfill.
+func (bw *BaseWorker) idleKey() string {
+	return "on_demand/" + bw.chain.GetNetworkInternalCode() + "/idle"
+}
+
+func (bw *BaseWorker) loadIdleFlag() bool {
+	if bw.kvstore == nil || !bw.config.IsOnDemand() {
+		return false
+	}
+	var idle bool
+	found, err := bw.kvstore.GetAny(bw.idleKey(), &idle)
+	return err == nil && found && idle
+}
+
+func (bw *BaseWorker) saveIdleFlag(idle bool) {
+	if bw.kvstore == nil {
+		return
+	}
+	if err := bw.kvstore.SetAny(bw.idleKey(), idle); err != nil {
+		bw.logger.Warn("Saving idle state failed", "error", err)
+	}
+}
+
 // processingHead returns the highest block this worker may process after the
 // chain-specific confirmation delay. The guard prevents uint64 underflow while
 // a chain is still below its configured confirmation count.

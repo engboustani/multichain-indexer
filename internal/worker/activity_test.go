@@ -130,3 +130,20 @@ func blockResults(from, to uint64) []indexer.BlockResult {
 	}
 	return out
 }
+
+func TestRegularWorker_RestartWhileIdleQueuesNoGap(t *testing.T) {
+	chain := &stubIndexer{name: "BSC_TESTNET", internalCode: "BSC_TESTNET", latestErr: errors.New("must not be called")}
+	store := &stubBlockStore{latestBlock: 1000}
+	rw := newTestRegularWorker(chain, store, 0, 10)
+	rw.idle = true
+
+	assert.Equal(t, uint64(1000), rw.determineStartingBlock())
+	assert.Empty(t, store.savedCatchupRanges)
+}
+
+func TestRescannerWorker_IdleChainRetriesNothing(t *testing.T) {
+	rw := &RescannerWorker{BaseWorker: &BaseWorker{config: onDemandChain("bsc_testnet", time.Hour)}, interval: time.Millisecond}
+	rw.activity = loadedActivity(t, map[string]time.Time{})
+
+	require.NoError(t, rw.processRescan(), "returns before touching the store or the chain")
+}

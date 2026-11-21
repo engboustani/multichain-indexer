@@ -76,10 +76,10 @@ func NewRegularWorker(
 		statusRegistry,
 	)
 	rw := &RegularWorker{BaseWorker: worker, deferHeadWait: true}
+	rw.idle = rw.loadIdleFlag()
 	rw.currentBlock = rw.determineStartingBlock()
 	rw.deferHeadWait = false
 	rw.loadBlockHashes()
-	rw.idle = rw.loadIdleFlag()
 	return rw
 }
 
@@ -237,6 +237,10 @@ func (rw *RegularWorker) determineStartingBlock() uint64 {
 
 	// Resume from the last indexed block when the store has one.
 	if kvErr == nil && kvLatest > 0 {
+		if rw.idle {
+			// Idle when stopped: nothing to catch up on; waking moves to the head.
+			return kvLatest
+		}
 		chainLatest, chainErr := rw.getLatestBlockWithRetry()
 		if chainErr != nil {
 			rw.logger.Warn("Chain RPC failed, resuming from KV latest",
@@ -510,28 +514,6 @@ func (rw *RegularWorker) resumeFromIdle(head uint64) {
 	rw.idle = false
 	rw.saveIdleFlag(false)
 	rw.logger.Info("Payment awaited; reading the chain again", "chain", rw.chain.GetName(), "from_block", rw.currentBlock)
-}
-
-func (rw *RegularWorker) idleKey() string {
-	return "on_demand/" + rw.chain.GetNetworkInternalCode() + "/idle"
-}
-
-func (rw *RegularWorker) loadIdleFlag() bool {
-	if rw.kvstore == nil {
-		return false
-	}
-	var idle bool
-	found, err := rw.kvstore.GetAny(rw.idleKey(), &idle)
-	return err == nil && found && idle
-}
-
-func (rw *RegularWorker) saveIdleFlag(idle bool) {
-	if rw.kvstore == nil {
-		return
-	}
-	if err := rw.kvstore.SetAny(rw.idleKey(), idle); err != nil {
-		rw.logger.Warn("Saving idle state failed", "error", err)
-	}
 }
 
 func (rw *RegularWorker) currentIndexedBlock() uint64 {

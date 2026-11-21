@@ -176,6 +176,11 @@ func (rw *RescannerWorker) collectBlocksForRetry() []uint64 {
 }
 
 func (rw *RescannerWorker) processRescan() error {
+	// No payment awaited on this chain: failed blocks are retried once it's read again.
+	if rw.isIdle() {
+		time.Sleep(rw.interval)
+		return nil
+	}
 	if err := rw.syncFromKV(); err != nil {
 		rw.logger.Error("Failed sync KV", "error", err)
 	}

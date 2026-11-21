@@ -182,11 +182,16 @@ func BuildWorkers(
 	return workers
 }
 
-// setActivityOnWorkers lets the workers of an on-demand chain pause while no payment is awaited on it.
+// setActivityOnWorkers lets the workers of an on-demand chain pause while no payment is awaited on it. Manual
+// rescans, which an operator asks for, still run.
 func setActivityOnWorkers(workers []Worker, activity *ChainActivity) {
 	for _, w := range workers {
 		switch wt := w.(type) {
 		case *RegularWorker:
+			wt.BaseWorker.activity = activity
+		case *CatchupWorker:
+			wt.BaseWorker.activity = activity
+		case *RescannerWorker:
 			wt.BaseWorker.activity = activity
 		case *MempoolWorker:
 			wt.BaseWorker.activity = activity
