@@ -31,3 +31,12 @@ func TestBadgerStore_RewritesAndCloseWithGC(t *testing.T) {
 	assert.Equal(t, big+string(rune('a'+49%26)), value)
 	require.NoError(t, reopened.Close())
 }
+
+// The block store wraps the shared store and closes it, then the manager closes it again at shutdown.
+func TestBadgerStore_CloseTwiceDoesNotPanic(t *testing.T) {
+	store, err := NewBadgerStore(t.TempDir(), "test", infra.JSON)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Close())
+	require.NotPanics(t, func() { require.NoError(t, store.Close()) })
+}
