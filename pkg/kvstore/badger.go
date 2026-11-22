@@ -3,6 +3,7 @@ package kvstore
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
@@ -27,6 +28,9 @@ type BadgerStore struct {
 	codec  infra.Codec
 	stopGC chan struct{}
 	gcDone chan struct{}
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func NewBadgerStore(path string, prefix string, codec infra.Codec) (*BadgerStore, error) {
@@ -245,8 +249,13 @@ func (b *BadgerStore) Delete(key string) error {
 	})
 }
 
+// Close stops GC and closes the database. Safe to call more than once: the store is shared (the block store wraps it
+// and closes it too), and a second close used to panic on the closed GC channel at shutdown.
 func (b *BadgerStore) Close() error {
-	close(b.stopGC)
-	<-b.gcDone
-	return b.db.Close()
+	b.closeOnce.Do(func() {
+		close(b.stopGC)
+		<-b.gcDone
+		b.closeErr = b.db.Close()
+	})
+	return b.closeErr
 }
