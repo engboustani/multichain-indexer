@@ -70,6 +70,7 @@ type SolanaAccountWorker struct {
 	cursorCache  map[string]string
 	lastFull     time.Time
 	recent       *recentSignatures
+	idle         bool
 }
 
 type solanaMint struct {
@@ -140,6 +141,19 @@ func (w *SolanaAccountWorker) Start() {
 // poll is one round: new addresses, balances, then the transactions of the accounts that changed.
 func (w *SolanaAccountWorker) poll() error {
 	ctx := w.ctx
+	if w.isIdle() {
+		if !w.idle {
+			w.idle = true
+			w.logger.Info("No payment awaited on this chain; idle until an order is created on it", "chain", w.chain.GetName())
+		}
+		return nil
+	}
+	if w.idle {
+		// Cursors kept every account's place, so a full check picks up anything that arrived while idle.
+		w.idle = false
+		w.lastFull = time.Time{}
+		w.logger.Info("Payment awaited; watching accounts again", "chain", w.chain.GetName())
+	}
 	if err := w.ensureFloor(ctx); err != nil {
 		return fmt.Errorf("floor slot: %w", err)
 	}

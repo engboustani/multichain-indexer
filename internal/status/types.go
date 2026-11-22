@@ -12,6 +12,8 @@ const (
 	HealthHealthy  HealthStatus = "healthy"
 	HealthSlow     HealthStatus = "slow"
 	HealthDegraded HealthStatus = "degraded"
+	// An on-demand chain with no payment awaited: deliberately not read.
+	HealthIdle HealthStatus = "idle"
 )
 
 type NetworkStatus struct {
@@ -32,6 +34,11 @@ type NetworkStatus struct {
 	Providers []ProviderStatus `json:"providers,omitempty"`
 	// True when an operator replaced the configured nodes at runtime (PUT /admin/chains/{network}/nodes).
 	NodesOverridden bool `json:"nodes_overridden"`
+	// On-demand chains are read only while a payment is awaited on them. Idle: none is, so the chain isn't read
+	// (health "idle"); ActiveUntil: when an active one goes idle unless another order comes.
+	OnDemand    bool       `json:"on_demand"`
+	Idle        bool       `json:"idle"`
+	ActiveUntil *time.Time `json:"active_until,omitempty"`
 }
 
 type StatusResponse struct {
@@ -69,6 +76,7 @@ type chainState struct {
 	catchupRanges        map[catchupRangeKey]uint64
 	catchupPendingBlocks uint64
 	providers            func() []ProviderStatus
+	activity             func() (onDemand, active bool, until time.Time)
 }
 
 type chainSnapshot struct {
@@ -84,4 +92,5 @@ type chainSnapshot struct {
 	catchupRangesCount   int
 	catchupPendingBlocks uint64
 	providers            func() []ProviderStatus
+	activity             func() (onDemand, active bool, until time.Time)
 }

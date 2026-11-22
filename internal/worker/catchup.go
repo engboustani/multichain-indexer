@@ -92,6 +92,16 @@ func (cw *CatchupWorker) runCatchup() {
 		default:
 		}
 
+		// No payment awaited on this chain: ranges wait until it's read again.
+		if cw.isIdle() {
+			select {
+			case <-cw.ctx.Done():
+				return
+			case <-time.After(cw.catchupIdleDelay()):
+			}
+			continue
+		}
+
 		err := cw.executeRecoverable("catchup pass", cw.processCatchupBlocksParallel)
 		if err != nil {
 			cw.logger.Error("Catchup job error", "err", err)
@@ -171,8 +181,9 @@ func (cw *CatchupWorker) loadCatchupProgress() []blockstore.CatchupRange {
 		)
 	}
 
-	// Only create a new range if no existing ranges found
-	if len(ranges) == 0 {
+	// Only create a new range if no existing ranges found, and not for an on-demand chain that was idle when stopped:
+	// it has nothing to catch up on.
+	if len(ranges) == 0 && !cw.loadIdleFlag() {
 		// latest == 0 means cold start (GetLatestBlock returns (0, nil) for a
 		// missing key) — queueing 1..head would re-index the whole chain.
 		if latest, err1 := cw.blockStore.GetLatestBlock(cw.chain.GetNetworkInternalCode()); err1 == nil && latest > 0 {

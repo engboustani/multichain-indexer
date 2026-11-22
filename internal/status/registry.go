@@ -183,6 +183,18 @@ func (r *Registry) DeleteCatchupRange(chainKey string, start, end uint64) {
 	}
 }
 
+// SetActivitySource registers how to tell whether an on-demand chain is being read; it is called on every snapshot.
+func (r *Registry) SetActivitySource(chainKey string, source func() (onDemand, active bool, until time.Time)) {
+	key := config.CanonicalChainKey(chainKey)
+	if key == "" {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ensureStateLocked(key).activity = source
+}
+
 func (r *Registry) Snapshot(version string) StatusResponse {
 	r.mu.RLock()
 	states := make([]chainSnapshot, 0, len(r.chains))
@@ -200,6 +212,7 @@ func (r *Registry) Snapshot(version string) StatusResponse {
 			catchupRangesCount:   len(state.catchupRanges),
 			catchupPendingBlocks: state.catchupPendingBlocks,
 			providers:            state.providers,
+			activity:             state.activity,
 		})
 	}
 	r.mu.RUnlock()
@@ -232,6 +245,18 @@ func (r *Registry) Snapshot(version string) StatusResponse {
 		}
 		if state.providers != nil {
 			item.Providers = state.providers()
+		}
+		if state.activity != nil {
+			onDemand, active, until := state.activity()
+			item.OnDemand = onDemand
+			item.Idle = onDemand && !active
+			if item.Idle {
+				item.Health = HealthIdle
+			}
+			if onDemand && active && !until.IsZero() {
+				u := until.UTC()
+				item.ActiveUntil = &u
+			}
 		}
 		networks = append(networks, item)
 	}

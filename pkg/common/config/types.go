@@ -56,6 +56,8 @@ type Defaults struct {
 	TwoWayIndexing      bool               `yaml:"two_way_indexing"`
 	PollInterval        time.Duration      `yaml:"poll_interval"         validate:"required"`
 	ReorgRollbackWindow int                `yaml:"reorg_rollback_window" validate:"required,min=1"`
+	OnDemand            *bool              `yaml:"on_demand"`
+	IdleGrace           time.Duration      `yaml:"idle_grace"`
 	Status              StatusConfig       `yaml:"status"`
 	Client              ClientConfig       `yaml:"client"`
 	Throttle            Throttle           `yaml:"throttle"`
@@ -78,15 +80,19 @@ type ChainConfig struct {
 	TwoWayIndexing      bool             `yaml:"two_way_indexing"`
 	Confirmations       uint64           `yaml:"confirmations"`
 	MaxLag              uint64           `yaml:"max_lag"`
-	IndexUTXO           bool             `yaml:"index_utxo"`
-	DebugTrace          bool             `yaml:"debug_trace"`
-	TraceThrottle       TraceThrottle    `yaml:"trace_throttle"`
-	Status              StatusConfig     `yaml:"status"`
-	Client              ClientConfig     `yaml:"client"`
-	Throttle            Throttle         `yaml:"throttle"`
-	Ton                 TonConfig        `yaml:"ton"`
-	Solana              SolanaConfig     `yaml:"solana"`
-	Nodes               []NodeConfig     `yaml:"nodes"                 validate:"required,min=1"`
+	// OnDemand: read the chain only while it has a watch window open (watch_windows, written when an order is created
+	// on it) plus IdleGrace, so late payments are still seen. Otherwise the chain is idle and makes no RPC calls.
+	OnDemand      *bool         `yaml:"on_demand"`
+	IdleGrace     time.Duration `yaml:"idle_grace"`
+	IndexUTXO     bool          `yaml:"index_utxo"`
+	DebugTrace    bool          `yaml:"debug_trace"`
+	TraceThrottle TraceThrottle `yaml:"trace_throttle"`
+	Status        StatusConfig  `yaml:"status"`
+	Client        ClientConfig  `yaml:"client"`
+	Throttle      Throttle      `yaml:"throttle"`
+	Ton           TonConfig     `yaml:"ton"`
+	Solana        SolanaConfig  `yaml:"solana"`
+	Nodes         []NodeConfig  `yaml:"nodes"                 validate:"required,min=1"`
 }
 
 type StatusConfig struct {
